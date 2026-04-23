@@ -1,0 +1,264 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ART_DIRECTOR
+  PROP_MASTER
+  SET_DECORATOR
+  CONSTRUCTION_COORDINATOR
+  LINE_PRODUCER
+  PRODUCTION_MANAGER
+  CREW
+  ASSISTANT
+}
+
+enum Department {
+  graphics
+  props
+  set_decoration
+  construction
+}
+
+enum ApprovalStatus {
+  draft
+  submitted
+  approved
+  rejected
+  on_hold
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  avatarUrl     String?
+  role          Role      @default(CREW)
+  department    Department?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  createdCards  Card[]    @relation("CardCreatedBy")
+  assignedCards Card[]    @relation("CardAssignedTo")
+  approvedCards Card[]    @relation("CardApprovedBy")
+  boardMembers  BoardMember[]
+  comments      Comment[]
+
+  @@map("users")
+}
+
+model Board {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  projectId   String
+  archivedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lists       List[]
+  members     BoardMember[]
+
+  @@map("boards")
+}
+
+model BoardMember {
+  id        String   @id @default(uuid())
+  boardId   String
+  userId    String
+  role      Role     @default(CREW)
+  joinedAt  DateTime @default(now())
+
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, userId])
+  @@map("board_members")
+}
+
+model List {
+  id          String   @id @default(uuid())
+  boardId     String
+  title       String
+  position    Float    @default(0)
+  workflowType String? // 'graphics_pipeline', 'props_pipeline', 'set_dec_pipeline', 'construction_pipeline'
+  archivedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  board       Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards       Card[]
+
+  @@index([boardId, position])
+  @@map("lists")
+}
+
+model Card {
+  id              String          @id @default(uuid())
+  listId          String
+  title           String
+  description     String?
+  position        Float           @default(0)
+  coverImageUrl   String?
+  dueDate         DateTime?
+  startDate       DateTime?
+
+  // Metadatos cinematograficos universales
+  department      Department?
+  scriptReference String?         @map("script_reference")
+  sceneNumbers    Int[]           @map("scene_numbers")
+  locationId      String?         @map("location_id")
+
+  // Campos financieros controlados por RBAC
+  estimatedCost   Decimal?        @map("estimated_cost") @db.Decimal(12, 2)
+  actualCost      Decimal?        @map("actual_cost") @db.Decimal(12, 2)
+  poNumber        String?         @map("po_number")
+  approvalStatus  ApprovalStatus  @default(draft) @map("approval_status")
+  approvedById    String?         @map("approved_by")
+  approvedAt      DateTime?       @map("approved_at")
+
+  // Metadatos extensibles por subdepartamento (JSONB)
+  artMetadata     Json?           @map("art_metadata")
+
+  // Gestión de archivos y continuidad
+  attachments     Json?           @default("[]")
+  continuityPhotos Json?          @map("continuity_photos") @default("[]")
+
+  // Auditoria y timestamps
+  createdById     String          @map("created_by")
+  assignedToId    String?         @map("assigned_to")
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  archivedAt      DateTime?
+
+  list            List            @relation(fields: [listId], references: [id], onDelete: Cascade)
+  location        Location?       @relation(fields: [locationId], references: [id])
+  createdBy       User            @relation("CardCreatedBy", fields: [createdById], references: [id])
+  assignedTo      User?           @relation("CardAssignedTo", fields: [assignedToId], references: [id])
+  approvedBy      User?           @relation("CardApprovedBy", fields: [approvedById], references: [id])
+  sceneCards      SceneCard[]
+  comments        Comment[]
+  checklists      Checklist[]
+
+  @@index([listId, position])
+  @@index([department])
+  @@index([scriptReference])
+  @@index([approvalStatus])
+  @@index([assignedToId])
+  @@index([createdById])
+  @@map("cards")
+}
+
+model SceneCard {
+  id          String   @id @default(uuid())
+  sceneId     String   @map("scene_id")
+  cardId      String   @map("card_id")
+  createdAt   DateTime @default(now())
+
+  scene       ScriptScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  card        Card        @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([sceneId, cardId])
+  @@map("scene_cards")
+}
+
+model ScriptScene {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  sceneNumber     String   @map("scene_number")
+  intExt          String?  @map("int_ext")
+  dayNight        String?  @map("day_night")
+  locationName    String?  @map("location_name")
+  description     String?
+  scriptPageStart Float?   @map("script_page_start")
+  scriptPageEnd   Float?   @map("script_page_end")
+  characters      String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  sceneCards      SceneCard[]
+
+  @@index([projectId, sceneNumber])
+  @@map("script_scenes")
+}
+
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String
+  category    String   // 'furniture_rental', 'prop_house', 'print_shop', 'lumber_yard', 'scenic_paint'
+  contactName String?  @map("contact_name")
+  email       String?
+  phone       String?
+  address     String?
+  website     String?
+  taxId       String?  @map("tax_id")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("suppliers")
+}
+
+model Location {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  name            String
+  address         String?
+  dimensions      Json?    // {width_m, depth_m, height_m}
+  restrictions    String?
+  ownerContact    String?  @map("owner_contact")
+  availability    Json?    // Array de fechas disponibles
+  isStudio        Boolean  @default(false) @map("is_studio")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  cards           Card[]
+
+  @@index([projectId])
+  @@map("locations")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  cardId    String   @map("card_id")
+  userId    String   @map("user_id")
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+}
+
+model Checklist {
+  id        String          @id @default(uuid())
+  cardId    String          @map("card_id")
+  title     String
+  position  Float           @default(0)
+  createdAt DateTime        @default(now())
+
+  card      Card            @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  items     ChecklistItem[]
+
+  @@map("checklists")
+}
+
+model ChecklistItem {
+  id          String   @id @default(uuid())
+  checklistId String   @map("checklist_id")
+  content     String
+  isCompleted Boolean  @default(false) @map("is_completed")
+  position    Float    @default(0)
+  createdAt   DateTime @default(now())
+
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@map("checklist_items")
+}
